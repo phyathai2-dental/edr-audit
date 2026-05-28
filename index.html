@@ -407,6 +407,13 @@
     <p>Electronic Dental Record Audit Checklist — แผนกทันตกรรม รพ.พญาไท 2</p>
   </div>
 
+  <!-- แบนเนอร์เตือนเมื่อเปิดใน in-app browser (LINE/Facebook) -->
+  <div id="inAppWarning" style="display:none; background:#fffbeb; border-bottom:1px solid #fde68a; padding:12px 20px; font-size:13px; color:#92400e; line-height:1.5;">
+    <strong>💡 แนะนำ:</strong> คุณกำลังเปิดในแอป (เช่น LINE) หากกดส่งแล้วไม่ทำงาน
+    กรุณากดปุ่ม <strong>"⋯"</strong> มุมขวาบน แล้วเลือก <strong>"เปิดในเบราว์เซอร์" / "Open in Safari"</strong>
+    เพื่อให้ใช้งานได้สมบูรณ์
+  </div>
+
   <div class="meta-section">
     <div class="field-group">
       <label>HN ผู้ป่วย</label>
@@ -719,6 +726,22 @@
     <button class="btn btn-primary" onclick="submitToGoogleForm()">📤 ส่งรายงานเข้า Google Drive</button>
   </div>
 </div>
+
+<!-- Custom confirm dialog (ทำงานได้ทุก browser รวม in-app browser ของ LINE) -->
+<div id="confirmOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:white; border-radius:14px; max-width:380px; width:100%; padding:24px; box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+    <div id="confirmTitle" style="font-size:18px; font-weight:700; color:#111827; margin-bottom:8px;">ยืนยันการส่ง</div>
+    <div id="confirmMessage" style="font-size:14px; color:#4b5563; line-height:1.6; margin-bottom:20px;"></div>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button id="confirmCancel" style="padding:10px 18px; border-radius:8px; font-size:14px; font-weight:600; font-family:inherit; border:1px solid #d1d5db; background:white; color:#374151; cursor:pointer;">ยกเลิก</button>
+      <button id="confirmOk" style="padding:10px 18px; border-radius:8px; font-size:14px; font-weight:600; font-family:inherit; border:none; background:#1e40af; color:white; cursor:pointer;">ยืนยัน</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden iframe + form สำหรับส่งข้อมูลเข้า Google Form (ทำงานได้ใน in-app browser) -->
+<iframe name="hidden_form_target" id="hidden_form_target" style="display:none;"></iframe>
+<form id="googleForm" method="POST" target="hidden_form_target" style="display:none;"></form>
 
 <script>
   document.getElementById('auditDate').valueAsDate = new Date();
@@ -1042,6 +1065,31 @@
     return true;
   }
 
+  // Custom confirm dialog — ใช้แทน confirm() เพราะ in-app browser บางตัวบล็อก confirm()
+  function customConfirm(title, message, onConfirm) {
+    const overlay = document.getElementById('confirmOverlay');
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    overlay.style.display = 'flex';
+
+    const okBtn = document.getElementById('confirmOk');
+    const cancelBtn = document.getElementById('confirmCancel');
+
+    // ล้าง event เก่าด้วยการ clone
+    const newOk = okBtn.cloneNode(true);
+    const newCancel = cancelBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(newOk, okBtn);
+    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+    newOk.addEventListener('click', function() {
+      overlay.style.display = 'none';
+      onConfirm();
+    });
+    newCancel.addEventListener('click', function() {
+      overlay.style.display = 'none';
+    });
+  }
+
   function submitToGoogleForm() {
     if (!validateBeforeSubmit()) return;
 
@@ -1050,33 +1098,44 @@
       return;
     }
 
-    if (!confirm('ยืนยันส่งรายงานเข้า Google Drive?')) return;
-
-    const data = gatherData();
-    const formData = new FormData();
-    formData.append(GOOGLE_FORM_CONFIG.fields.hn, data.hn);
-    formData.append(GOOGLE_FORM_CONFIG.fields.date, data.date);
-    formData.append(GOOGLE_FORM_CONFIG.fields.auditor, data.auditor);
-    formData.append(GOOGLE_FORM_CONFIG.fields.totalScore, data.score);
-    formData.append(GOOGLE_FORM_CONFIG.fields.section1, data.section1);
-    formData.append(GOOGLE_FORM_CONFIG.fields.section2, data.section2);
-    formData.append(GOOGLE_FORM_CONFIG.fields.section3, data.section3);
-    formData.append(GOOGLE_FORM_CONFIG.fields.section4, data.section4);
-    formData.append(GOOGLE_FORM_CONFIG.fields.section5, data.section5);
-    formData.append(GOOGLE_FORM_CONFIG.fields.summary, data.summary);
-    formData.append(GOOGLE_FORM_CONFIG.fields.detail, data.detail);
-
-    // ใช้ no-cors mode เพราะ Google Form ไม่ตอบ CORS — ส่งได้แต่อ่าน response ไม่ได้
-    fetch(GOOGLE_FORM_CONFIG.formUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      body: formData
-    }).then(() => {
-      showSubmitSuccess(data);
-    }).catch((err) => {
-      console.error(err);
-      alert('⚠️ ส่งรายงานไม่สำเร็จ\n\nกรุณาลองใหม่ หรือใช้ปุ่ม "ดาวน์โหลด CSV" แทน');
+    customConfirm('ยืนยันการส่งรายงาน', 'ต้องการส่งรายงานเข้า Google Drive ใช่หรือไม่?', function() {
+      doSubmit();
     });
+  }
+
+  function doSubmit() {
+    const data = gatherData();
+
+    // สร้าง form submit เข้า hidden iframe — ทำงานได้ใน in-app browser ทุกตัว
+    const form = document.getElementById('googleForm');
+    form.action = GOOGLE_FORM_CONFIG.formUrl;
+    form.innerHTML = ''; // ล้างของเก่า
+
+    const addField = (name, value) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+
+    addField(GOOGLE_FORM_CONFIG.fields.hn, data.hn);
+    addField(GOOGLE_FORM_CONFIG.fields.date, data.date);
+    addField(GOOGLE_FORM_CONFIG.fields.auditor, data.auditor);
+    addField(GOOGLE_FORM_CONFIG.fields.totalScore, data.score);
+    addField(GOOGLE_FORM_CONFIG.fields.section1, data.section1);
+    addField(GOOGLE_FORM_CONFIG.fields.section2, data.section2);
+    addField(GOOGLE_FORM_CONFIG.fields.section3, data.section3);
+    addField(GOOGLE_FORM_CONFIG.fields.section4, data.section4);
+    addField(GOOGLE_FORM_CONFIG.fields.section5, data.section5);
+    addField(GOOGLE_FORM_CONFIG.fields.summary, data.summary);
+    addField(GOOGLE_FORM_CONFIG.fields.detail, data.detail);
+
+    // submit เข้า hidden iframe — หน้าจอไม่เปลี่ยน
+    form.submit();
+
+    // แสดงผลสำเร็จ (form submit ไม่ throw error ใน in-app browser)
+    showSubmitSuccess(data);
   }
 
   function showSubmitSuccess(data) {
@@ -1089,6 +1148,7 @@
                        'คะแนน: ' + data.score + '\n\n' +
                        'รายงานถูกบันทึกใน Google Drive แล้ว';
     area.classList.add('show');
+    area.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setTimeout(() => {
       area.style.background = '#1f2937';
     }, 3000);
@@ -1128,6 +1188,16 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
+  // ตรวจจับ in-app browser (LINE, Facebook, Instagram) แล้วแสดงแบนเนอร์เตือน
+  (function detectInAppBrowser() {
+    const ua = navigator.userAgent || '';
+    const isInApp = /Line\/|FBAN|FBAV|Instagram|FB_IAB|Messenger/i.test(ua);
+    if (isInApp) {
+      const warn = document.getElementById('inAppWarning');
+      if (warn) warn.style.display = 'block';
+    }
+  })();
 
   calculate();
 </script>
